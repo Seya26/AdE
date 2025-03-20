@@ -1,0 +1,187 @@
+#define PIN  2 // Pin del sensore DS18B20
+
+// Pin per il display a 7 segmenti
+#define SEGMENT_A 3
+#define SEGMENT_B 4
+#define SEGMENT_C 5
+#define SEGMENT_D 6
+#define SEGMENT_E 7
+#define SEGMENT_F 8
+#define SEGMENT_G 9
+#define DIGIT_1 10
+#define DIGIT_2 11
+#define DIGIT_3 12
+#define DIGIT_4 13
+
+// Mappa dei segmenti per i numeri 0-9
+const byte segmentMap[10] = {
+  B00111111, // 0
+  B00000110, // 1
+  B01011011, // 2
+  B01001111, // 3
+  B01100110, // 4
+  B01101101, // 5
+  B01111101, // 6
+  B00000111, // 7
+  B01111111, // 8
+  B01101111  // 9
+};
+
+void displayNumber(int number);
+void displayDigit(int digit, int position);
+
+void setup() {
+    Serial.begin(9600);
+    pinMode(PIN, INPUT_PULLUP);
+    delay(100);
+    Serial.println("Inizio misurazione della temperatura:");
+
+    // Configura i pin del display come output
+    for (int i = 3; i <= 14; i++) {
+        pinMode(i, OUTPUT);
+    }
+}
+
+void loop() {
+    byte lowByte, highByte;
+  
+  // Leggi la temperatura
+  readTemperature(lowByte, highByte);
+  
+  // Combina i byte
+  int16_t rawTemperature = (highByte << 8) | lowByte;
+  
+  // Converte la temperatura in Celsius
+  float temperatureC = rawTemperature / 16.0;
+  
+    Serial.print("Temperatura: ");
+    Serial.print(temperatureC);
+    Serial.println(" °C");
+
+    // Visualizza il numero sul display a 7 segmenti
+    int intTemp = (int)temperatureC;  // Solo la parte intera
+    displayNumber(intTemp);
+
+    delay(5000);
+}
+
+// Funzione per visualizzare il numero sul display
+void displayNumber(int number) {
+    // Divide il numero in quattro cifre per mostrarlo su 4 digit
+    int digit1 = number / 1000;
+    int digit2 = (number / 100) % 10;
+    int digit3 = (number / 10) % 10;
+    int digit4 = number % 10;
+
+    // Visualizza i numeri sui digit
+    displayDigit(digit1, 1);
+    delay(5);  // Ritardo per il multiplexing
+    displayDigit(digit2, 2);
+    delay(5);  // Ritardo per il multiplexing
+    displayDigit(digit3, 3);
+    delay(5);  // Ritardo per il multiplexing
+    displayDigit(digit4, 4);
+    delay(5);  // Ritardo per il multiplexing
+}
+
+// Funzione per visualizzare un singolo numero su un dato digit
+void displayDigit(int digit, int position) {
+    byte segments = segmentMap[digit];  // Ottieni la mappa dei segmenti per il numero
+
+    // Disabilita tutti i digit
+    digitalWrite(DIGIT_1, LOW);
+    digitalWrite(DIGIT_2, LOW);
+    digitalWrite(DIGIT_3, LOW);
+    digitalWrite(DIGIT_4, LOW);
+
+    // Accendi il digit selezionato
+    switch(position) {
+        case 1: digitalWrite(DIGIT_1, HIGH); break;
+        case 2: digitalWrite(DIGIT_2, HIGH); break;
+        case 3: digitalWrite(DIGIT_3, HIGH); break;
+        case 4: digitalWrite(DIGIT_4, HIGH); break;
+    }
+
+    // Accendi i segmenti corrispondenti al numero
+    for (int i = 0; i < 7; i++) {
+        if (segments & (1 << i)) {
+            digitalWrite(SEGMENT_A + i, HIGH);
+        } else {
+            digitalWrite(SEGMENT_A + i, LOW);
+        }
+    }
+}
+
+void writeBit(bool bitValue) {
+  pinMode(PIN, OUTPUT);
+  digitalWrite(PIN, LOW);
+  delayMicroseconds(2);
+  
+  if (bitValue) {
+    digitalWrite(PIN, HIGH);
+  }
+  delayMicroseconds(60);
+  pinMode(PIN, INPUT);
+  delayMicroseconds(2);
+}
+
+// Funzione per leggere un bit dalla linea One-Wire
+bool readBit() {
+  pinMode(PIN, OUTPUT);
+  digitalWrite(PIN, LOW);
+  delayMicroseconds(2);
+  
+  pinMode(PIN, INPUT);
+  delayMicroseconds(8);
+  bool bitValue = digitalRead(PIN);
+  delayMicroseconds(55);
+  
+  return bitValue;
+}
+
+// Funzione per inviare un byte sulla linea One-Wire (bit per bit)
+void writeByte(byte byteValue) {
+  for (int i = 0; i < 8; i++) {
+    writeBit(byteValue & 0x01);
+    byteValue >>= 1;
+  }
+}
+
+// Funzione per leggere un byte dalla linea One-Wire (bit per bit)
+byte readByte() {
+  byte result = 0;
+  for (int i = 0; i < 8; i++) {
+    result >>= 1;
+    if (readBit()) {
+      result |= 0x80;
+    }
+  }
+  return result;
+}
+
+// Funzione per inizializzare la comunicazione con il sensore DS18B20
+void reset() {
+  pinMode(PIN, OUTPUT);
+  digitalWrite(PIN, LOW);
+  delayMicroseconds(480); // Pulse di reset
+  pinMode(PIN, INPUT);
+  delayMicroseconds(70);  // Attendi la risposta
+  while (digitalRead(PIN) == HIGH); // Attendi la risposta del sensore
+  delayMicroseconds(410);
+}
+
+// Funzione per leggere la temperatura dal sensore
+void readTemperature(byte &lowByte, byte &highByte) {
+  reset();
+  writeByte(0xCC); // Comando skip ROM (per uno solo sensore)
+  writeByte(0x44); // Comando per avviare la misurazione della temperatura
+  
+  delay(1000); // Attendi che il sensore completi la misurazione
+  
+  reset();
+  writeByte(0xCC); // Comando skip ROM
+  writeByte(0xBE); // Comando per leggere la memoria del sensore
+  
+  lowByte = readByte();  // Leggi il byte basso
+  highByte = readByte(); // Leggi il byte alto
+}
